@@ -1,0 +1,617 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>EMA 9/20 Scanner</title>
+<meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#171f1c" media="(prefers-color-scheme: dark)">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="EMA Scanner">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="icon-192.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Manrope:wght@500;700;800&family=JetBrains+Mono:wght@400;600&display=swap">
+<style>
+/* Layout: one phone column; sticky header with timeframe switch, status line, breadth bar and filters; expandable symbol rows; recent signals; watchlist; settings. */
+:root {
+  --bg: #f3f5f4; --surface: #ffffff; --line: #dde3e0; --fg: #16201c; --muted: #5e6b66;
+  --accent: #1f5f8b; --accent-soft: #e3eef6;
+  --bull: #0f7a4f; --bull-soft: #dff2e8; --bear: #c0392b; --bear-soft: #fbe5e2; --mixed: #9a6a00; --mixed-soft: #f8edd2;
+  --ema9: #e08a00; --ema20: #6a4fc4;
+  --display: "Manrope", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --mono: "JetBrains Mono", ui-monospace, "SFMono-Regular", Consolas, monospace;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0f1513; --surface: #171f1c; --line: #26312d; --fg: #e6ece9; --muted: #93a29c;
+    --accent: #6fb3e0; --accent-soft: #16303f; --bull: #3ccf8e; --bull-soft: #123326;
+    --bear: #ff7a6b; --bear-soft: #3a1c19; --mixed: #e7b84b; --mixed-soft: #352a10;
+    --ema9: #ffad33; --ema20: #a48cff; color-scheme: dark;
+  }
+}
+* { box-sizing: border-box; }
+html { -webkit-text-size-adjust: 100%; }
+body { margin: 0; background: var(--bg); color: var(--fg); font-family: var(--display); font-size: 15px; line-height: 1.4; padding-bottom: env(safe-area-inset-bottom, 0px); }
+[hidden] { display: none !important; }
+.wrap { max-width: 640px; margin: 0 auto; padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); }
+header { position: sticky; top: 0; z-index: 5; background: var(--surface); border-bottom: 1px solid var(--line); padding-top: env(safe-area-inset-top, 0px); }
+header .wrap { padding-block: 12px 10px; display: grid; gap: 9px; }
+.top { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+h1 { font-size: 19px; font-weight: 800; margin: 0; letter-spacing: -0.01em; }
+.status { display: flex; align-items: center; justify-content: space-between; gap: 10px; font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; min-height: 28px; }
+.status .txt { min-width: 0; }
+.status .txt.busy { color: var(--accent); font-weight: 700; }
+.status .txt.bad { color: var(--bear); font-weight: 700; }
+.iconbtn { flex: 0 0 auto; border: 1px solid var(--line); background: var(--surface); color: var(--fg); border-radius: 8px; height: 30px; padding: 0 10px; font: 700 12px var(--display); cursor: pointer; }
+.iconbtn:disabled { opacity: .5; }
+.seg { display: inline-flex; background: var(--bg); border: 1px solid var(--line); border-radius: 9px; padding: 2px; gap: 2px; }
+.seg button { border: 0; background: none; cursor: pointer; font: 600 13px var(--mono); padding: 5px 11px; border-radius: 7px; color: var(--muted); }
+.seg button[aria-pressed="true"] { background: var(--surface); color: var(--fg); box-shadow: 0 1px 2px rgba(0,0,0,.12); }
+.breadth { display: flex; height: 6px; border-radius: 3px; overflow: hidden; background: var(--line); }
+.breadth span { display: block; height: 100%; transition: width .3s; }
+.tabs { display: flex; gap: 6px; overflow-x: auto; scrollbar-width: none; margin: 0 -2px; padding: 0 2px; }
+.tabs::-webkit-scrollbar { display: none; }
+.tab { flex: 0 0 auto; border: 1px solid var(--line); background: var(--surface); color: var(--fg); font: 700 13px var(--display); padding: 6px 11px; border-radius: 999px; cursor: pointer; display: inline-flex; gap: 6px; align-items: center; }
+.tab .n { font-family: var(--mono); font-weight: 600; font-size: 12px; color: var(--muted); }
+.tab[aria-pressed="true"] { background: var(--fg); color: var(--bg); border-color: var(--fg); }
+.tab[aria-pressed="true"] .n { color: var(--bg); opacity: .75; }
+button:focus-visible, input:focus-visible, a:focus-visible, select:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+main .wrap { padding-block: 12px 40px; display: grid; gap: 22px; }
+.note { font-size: 13px; color: var(--muted); background: var(--surface); border: 1px dashed var(--line); border-radius: 10px; padding: 12px 14px; display: grid; gap: 8px; }
+.note b { color: var(--fg); }
+.note.warn { color: var(--fg); border-style: solid; border-color: var(--mixed); background: var(--mixed-soft); }
+.note ol { margin: 0; padding-left: 20px; display: grid; gap: 4px; }
+.note .act { justify-self: start; }
+.list { display: grid; background: var(--surface); border: 1px solid var(--line); border-radius: 12px; overflow: hidden; }
+.row { border-top: 1px solid var(--line); }
+.row:first-child { border-top: 0; }
+.row > button { all: unset; box-sizing: border-box; width: 100%; display: grid; grid-template-columns: minmax(0, 1fr) 84px auto; gap: 10px; align-items: center; padding: 11px 14px 10px; cursor: pointer; position: relative; }
+.row > button:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.row > button::before { content: ""; position: absolute; left: 0; top: 10px; bottom: 10px; width: 3px; border-radius: 0 3px 3px 0; background: var(--line); }
+.row.bull > button::before { background: var(--bull); }
+.row.bear > button::before { background: var(--bear); }
+.row.mixed > button::before { background: var(--mixed); }
+.sym { min-width: 0; display: grid; gap: 5px; }
+.sym .t { display: flex; align-items: baseline; gap: 7px; min-width: 0; }
+.sym b { font-size: 16px; font-weight: 800; letter-spacing: .01em; }
+.sym .nm { font-size: 12px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pills { display: flex; gap: 4px; flex-wrap: wrap; align-items: center; }
+.pill { font: 600 11px var(--mono); padding: 2px 5px; border-radius: 4px; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.pill.up { color: var(--bull); background: var(--bull-soft); }
+.pill.dn { color: var(--bear); background: var(--bear-soft); }
+.pill.new { color: var(--surface); background: var(--accent); }
+.conf { display: inline-flex; gap: 3px; margin-left: 2px; }
+.conf span { font: 600 9px var(--mono); padding: 1px 3px; border-radius: 3px; color: var(--surface); background: var(--line); }
+.conf .bull { background: var(--bull); } .conf .bear { background: var(--bear); } .conf .mixed { background: var(--mixed); }
+.spark { width: 84px; height: 36px; display: block; }
+.px { text-align: right; font-family: var(--mono); font-variant-numeric: tabular-nums; display: grid; gap: 2px; }
+.px .p { font-size: 14px; font-weight: 600; }
+.px .c { font-size: 12px; }
+.upc { color: var(--bull); } .dnc { color: var(--bear); }
+.detail { padding: 0 14px 14px 17px; display: grid; gap: 12px; }
+.bigchart { width: 100%; height: 140px; display: block; background: var(--bg); border-radius: 8px; }
+.kv { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px 16px; margin: 0; }
+.kv div { min-width: 0; }
+.kv dt { font-size: 11px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); }
+.kv dd { margin: 2px 0 0; font-family: var(--mono); font-size: 13px; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.legend { display: flex; gap: 14px; font-size: 12px; color: var(--muted); flex-wrap: wrap; }
+.legend i { display: inline-block; width: 14px; height: 3px; border-radius: 2px; vertical-align: middle; margin-right: 5px; }
+.setline { display: grid; gap: 6px; }
+.setline > span { font-size: 11px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); }
+.setline .seg { justify-self: start; }
+.setline .seg button { font-family: var(--display); font-weight: 700; font-size: 12px; }
+.tv { justify-self: start; font-weight: 700; font-size: 14px; color: var(--accent); text-decoration: none; border: 1px solid var(--accent); padding: 7px 12px; border-radius: 8px; }
+.err { padding: 12px 14px; font-size: 13px; color: var(--muted); display: flex; justify-content: space-between; gap: 10px; }
+.err b { color: var(--fg); }
+h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); margin: 0 0 8px; font-weight: 800; }
+.sig { list-style: none; margin: 0; padding: 0; background: var(--surface); border: 1px solid var(--line); border-radius: 12px; overflow: hidden; }
+.sig li { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 10px; align-items: center; padding: 9px 14px; border-top: 1px solid var(--line); }
+.sig li:first-child { border-top: 0; }
+.sig .arrow { font-size: 14px; width: 18px; text-align: center; }
+.sig .what { min-width: 0; display: grid; gap: 1px; }
+.sig .what b { font-size: 14px; }
+.sig .what span { font-size: 12px; color: var(--muted); }
+.sig .tfc { font: 600 10px var(--mono); padding: 1px 4px; border-radius: 3px; background: var(--accent-soft); color: var(--accent); margin-left: 4px; vertical-align: 1px; }
+.sig .when { font: 12px var(--mono); color: var(--muted); text-align: right; }
+.sig .key { font-weight: 800; color: var(--fg); }
+.more { display: block; width: 100%; padding: 10px; background: none; border: 0; border-top: 1px solid var(--line); color: var(--accent); font: 700 13px var(--display); cursor: pointer; }
+.card { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 14px; display: grid; gap: 12px; }
+.chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.chip { display: inline-flex; align-items: center; gap: 4px; font: 600 13px var(--mono); background: var(--bg); border: 1px solid var(--line); border-radius: 6px; padding: 3px 4px 3px 9px; }
+.chip button { border: 0; background: none; cursor: pointer; width: 26px; height: 26px; display: grid; place-items: center; border-radius: 4px; color: var(--muted); font-size: 17px; line-height: 1; }
+form.inline { display: flex; gap: 8px; }
+form.inline input { flex: 1; min-width: 0; font: 600 15px var(--mono); padding: 10px 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg); color: var(--fg); }
+#addInput { text-transform: uppercase; }
+.btn { font: 800 14px var(--display); padding: 10px 16px; border: 0; border-radius: 8px; background: var(--accent); color: var(--surface); cursor: pointer; }
+.btn.ghost { background: var(--bg); color: var(--fg); border: 1px solid var(--line); }
+.btn:disabled { opacity: .5; cursor: default; }
+.toggles { display: flex; gap: 6px; flex-wrap: wrap; }
+.toggles button { font: 700 13px var(--mono); padding: 7px 12px; border-radius: 8px; border: 1px solid var(--line); background: var(--bg); color: var(--muted); cursor: pointer; }
+.toggles button[aria-pressed="true"] { background: var(--accent-soft); border-color: var(--accent); color: var(--accent); }
+.hint { font-size: 12px; color: var(--muted); margin: 0; }
+.msg { font-size: 13px; margin: 0; min-height: 1em; }
+.msg.bad { color: var(--bear); }
+.msg.good { color: var(--bull); }
+label.lbl { font-size: 11px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); }
+.divider { border: 0; border-top: 1px solid var(--line); margin: 2px 0; }
+.foot { font-size: 12px; color: var(--muted); margin: 0; }
+.toast { position: fixed; left: 50%; transform: translateX(-50%); bottom: calc(16px + env(safe-area-inset-bottom, 0px)); z-index: 20; width: min(92vw, 520px); background: var(--fg); color: var(--bg); border-radius: 12px; padding: 12px 14px; font-size: 14px; box-shadow: 0 6px 24px rgba(0,0,0,.25); display: grid; gap: 4px; }
+.toast small { opacity: .75; font-size: 12px; }
+@media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+</style>
+</head>
+<body>
+<header>
+  <div class="wrap">
+    <div class="top">
+      <h1>EMA 9/20 Scanner</h1>
+      <div class="seg" role="group" aria-label="Timeframe" id="tfSeg"></div>
+    </div>
+    <div class="status">
+      <span class="txt" id="statusTxt">Starting…</span>
+      <button class="iconbtn" id="refreshBtn" type="button">Refresh</button>
+    </div>
+    <div class="breadth" id="breadth" aria-hidden="true"></div>
+    <div class="tabs" role="toolbar" aria-label="Filter symbols" id="tabs"></div>
+  </div>
+</header>
+
+<main>
+  <div class="wrap">
+    <div id="banner" class="note" hidden></div>
+    <section aria-label="Symbols"><div class="list" id="list"></div></section>
+
+    <section id="sigBox" hidden>
+      <h2>Recent signals</h2>
+      <ul class="sig" id="sig"></ul>
+    </section>
+
+    <section>
+      <h2>Watchlist</h2>
+      <div class="card">
+        <div class="chips" id="chips"></div>
+        <form class="inline" id="addForm" autocomplete="off">
+          <input id="addInput" placeholder="EURUSD, XAUUSD, AAPL…" maxlength="14" aria-label="Symbol to add" enterkeyhint="done" autocapitalize="characters" spellcheck="false">
+          <button class="btn" type="submit">Add</button>
+        </form>
+        <p class="msg" id="addMsg" role="status"></p>
+        <p class="hint">Forex pairs (EURUSD), metals (XAUUSD), crypto (BTCUSD) and US stocks (AAPL). Up to 30 symbols. A larger list takes longer to load on the free plan.</p>
+      </div>
+    </section>
+
+    <section>
+      <h2>Alerts</h2>
+      <div class="card">
+        <div class="setline">
+          <span>Alert on these timeframes</span>
+          <div class="toggles" id="alertTfs"></div>
+        </div>
+        <p class="hint">Each symbol alerts on a confirmed EMA 9/20 cross. Open a symbol to switch it to all crosses or turn it off. Alerts only arrive while this app is open, because phones stop web apps that are closed.</p>
+        <div><button class="btn ghost" type="button" id="notifBtn">Turn on notifications</button></div>
+        <p class="msg" id="notifMsg" role="status"></p>
+      </div>
+    </section>
+
+    <section>
+      <h2>Data key</h2>
+      <div class="card">
+        <label class="lbl" for="keyInput">Twelve Data API key</label>
+        <form class="inline" id="keyForm" autocomplete="off">
+          <input id="keyInput" type="password" placeholder="Paste your free key" spellcheck="false" autocapitalize="off">
+          <button class="btn" type="submit">Save</button>
+        </form>
+        <p class="msg" id="keyMsg" role="status"></p>
+        <p class="hint">Free key at <a href="https://twelvedata.com/register" target="_blank" rel="noopener">twelvedata.com</a>. The free plan allows 8 symbol loads a minute and 800 a day; the app paces itself to stay inside that. The key is saved only on this phone.</p>
+      </div>
+    </section>
+
+    <p class="foot">Signals use closed candles only and need two closes to confirm: a cross counts once the next candle also closes on the new side. "With trend" means price is on the same side of EMA 200 on that timeframe. Prices come from Twelve Data and can differ slightly from your broker or TradingView. This is a chart tool, not trading advice.</p>
+  </div>
+</main>
+<div class="toast" id="toast" role="status" hidden></div>
+
+<script>
+(() => {
+  "use strict";
+  const $ = (id) => document.getElementById(id);
+  const TFS = ["1H", "4H", "D"];
+  const TF = { "1H": { api: "1h", secs: 3600, label: "1H", tv: "60" }, "4H": { api: "4h", secs: 14400, label: "4H", tv: "240" }, "D": { api: "1day", secs: 86400, label: "Daily", tv: "D" } };
+  const FILTERS = [["all", "All"], ["fresh", "Fresh"], ["aligned", "Aligned 3/3"], ["bull", "Above both"], ["mixed", "Mixed"], ["bear", "Below both"]];
+  const MODES = [["off", "Off"], ["cross", "9/20 cross"], ["all", "All crosses"]];
+  const CCY = new Set("USD EUR GBP JPY CAD AUD NZD CHF SEK NOK DKK SGD HKD MXN ZAR TRY CNH CNY PLN HUF CZK INR KRW THB ILS XAU XAG XPT XPD".split(" "));
+  const ALIAS = { GOLD: "XAU/USD", SILVER: "XAG/USD", BTCUSD: "BTC/USD", ETHUSD: "ETH/USD", SOLUSD: "SOL/USD", XRPUSD: "XRP/USD", USOIL: "WTI/USD", WTI: "WTI/USD", UKOIL: "BRENT/USD", BRENT: "BRENT/USD" };
+  const BARS = 300, SPARK = 40, PER_MIN_DEFAULT = 8, DAY_LIMIT = 800;
+  const SETTLE = 90; // seconds after a candle closes before asking for it
+
+  // ---------- storage ----------
+  const KEY = "emaScanner.v1";
+  const defaults = { apiKey: "", watchlist: ["USDCAD", "EURUSD", "GBPUSD", "USDJPY", "AUDUSD", "XAUUSD", "BTCUSD"], tf: "1H", filter: "all", alertTfs: ["1H", "4H", "D"], modes: { USDCAD: "all" }, perMin: PER_MIN_DEFAULT, lastSeen: {}, credits: { day: "", used: 0 } };
+  let S;
+  try { S = Object.assign({}, defaults, JSON.parse(localStorage.getItem(KEY) || "{}")); } catch (e) { S = Object.assign({}, defaults); }
+  let cache = {};
+  try { cache = JSON.parse(localStorage.getItem(KEY + ".cache") || "{}"); } catch (e) { cache = {}; }
+  const save = () => { try { localStorage.setItem(KEY, JSON.stringify(S)); } catch (e) {} };
+  const saveCache = () => { try { localStorage.setItem(KEY + ".cache", JSON.stringify(cache)); } catch (e) { /* full: drop oldest */ cache = {}; } };
+
+  // ---------- helpers ----------
+  const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; };
+  const now = () => Date.now() / 1000;
+  const apiSymbol = (s) => ALIAS[s] || (s.length === 6 && CCY.has(s.slice(0, 3)) && CCY.has(s.slice(3)) ? s.slice(0, 3) + "/" + s.slice(3) : s);
+  const decimals = (p) => p >= 100 ? 2 : p >= 20 ? 3 : 5;
+  const fmt = (n, d) => Number(n).toFixed(d);
+  const since = (t) => { const m = Math.max(0, Math.round((Date.now() / 1000 - t) / 60)); if (m < 60) return m + "m"; const h = Math.floor(m / 60); return h < 48 ? h + "h" : Math.floor(h / 24) + "d"; };
+  const clock = (t) => new Date(t * 1000).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12: false });
+  const dayClock = (t) => new Date(t * 1000).toLocaleString([], { weekday: "short", day: "numeric", hour: "2-digit", minute: "2-digit", hour12: false });
+  const tvUrl = (s, tf) => "https://www.tradingview.com/chart/?symbol=" + encodeURIComponent(s) + "&interval=" + TF[tf].tv;
+  const todayUTC = () => new Date().toISOString().slice(0, 10);
+  const modeOf = (s) => S.modes[s] || "cross";
+  const demo = () => !S.apiKey;
+
+  // ---------- analysis ----------
+  function ema(cl, n) { const k = 2 / (n + 1); let e = cl[0]; return cl.map((c) => (e = c * k + e * (1 - k))); }
+  function analyse(bars, tf) {
+    const secs = TF[tf].secs, ts = bars.map((b) => b[0]), cl = bars.map((b) => b[1]), n = cl.length;
+    const e9 = ema(cl, 9), e20 = ema(cl, 20), e200 = ema(cl, 200);
+    const s9 = cl.map((c, i) => c > e9[i]), s20 = cl.map((c, i) => c > e20[i]), rel = e9.map((v, i) => v > e20[i]);
+    const last = n - 1, d = decimals(cl[last]);
+    const change = (sr) => { let j = last; while (j > 25 && sr[j - 1] === sr[last]) j--; return { up: sr[last], t: ts[j] + secs, price: cl[j], bars: last - j }; };
+    const events = [];
+    for (let i = 27; i < n; i++) {
+      const trend = (up) => ((cl[i] > e200[i]) === up ? "with trend" : "against trend");
+      if (rel[i] === rel[i - 1] && rel[i - 1] !== rel[i - 2]) events.push({ kind: "cross", up: rel[i], text: (rel[i] ? "above" : "below") + " EMA 20", trend: trend(rel[i]), price: cl[i], t: ts[i] + secs });
+      [["9", s9], ["20", s20]].forEach(([nm, sr]) => {
+        if (sr[i] === sr[i - 1] && sr[i - 1] !== sr[i - 2]) events.push({ kind: "price", up: sr[i], text: "closed " + (sr[i] ? "above" : "below") + " EMA " + nm, trend: trend(sr[i]), price: cl[i], t: ts[i] + secs });
+      });
+    }
+    const st = s9[last] && s20[last] ? "bull" : !s9[last] && !s20[last] ? "bear" : "mixed";
+    return {
+      d, price: cl[last], ema9: e9[last], ema20: e20[last], ema200: e200[last],
+      above9: s9[last], above20: s20[last], above200: cl[last] > e200[last], state: st,
+      cross: change(rel), cross9: change(s9), cross20: change(s20), close: ts[last] + secs, events,
+      spark: { close: cl.slice(-SPARK), ema9: e9.slice(-SPARK), ema20: e20.slice(-SPARK) },
+      chg24h: tf === "1H" && n > 25 ? (cl[last] / cl[last - 24] - 1) * 100 : null,
+    };
+  }
+  const results = {}; // "SYM|TF" -> analysis or {error}
+  function analyseKey(k) {
+    const c = cache[k];
+    if (!c) return;
+    if (c.error) { results[k] = { error: c.error }; return; }
+    if (!c.bars || c.bars.length < 60) { results[k] = { error: "Not enough data yet" }; return; }
+    results[k] = analyse(c.bars, k.split("|")[1]);
+  }
+
+  // ---------- fetching with a credit budget ----------
+  let queue = [], busy = false, waitUntil = 0, lastError = "";
+  const solo = new Set(); // symbols that broke a batch request and now load on their own
+  const used = []; // timestamps of credits spent in the last minute
+  function creditsToday() { if (S.credits.day !== todayUTC()) S.credits = { day: todayUTC(), used: 0 }; return S.credits.used; }
+  function lastBoundary(tf) { const s = TF[tf].secs, t = now() - SETTLE; return t - (t % s); }
+  function isStale(k) { const c = cache[k]; const tf = k.split("|")[1]; return !c || (c.fetched || 0) < lastBoundary(tf) + SETTLE || (c.error && now() - c.fetched > 3600); }
+  function plan(force) {
+    const want = [];
+    const order = [S.tf].concat(TFS.filter((t) => t !== S.tf));
+    order.forEach((tf) => S.watchlist.forEach((s) => { const k = s + "|" + tf; if ((force || isStale(k)) && !queue.includes(k)) want.push(k); }));
+    queue = queue.concat(want);
+    pump();
+  }
+  async function pump() {
+    if (busy || !queue.length) { renderStatus(); return; }
+    busy = true;
+    try {
+      while (queue.length) {
+        if (!navigator.onLine) { lastError = "You're offline. The scan will resume when you reconnect."; break; }
+        if (creditsToday() >= DAY_LIMIT) { lastError = "Daily data limit reached (800). It resets at 00:00 UTC."; queue = []; break; }
+        const perMin = demo() ? 8 : Math.max(1, Number(S.perMin) || PER_MIN_DEFAULT);
+        const t = now();
+        while (used.length && t - used[0] > 61) used.shift();
+        const room = perMin - used.length;
+        if (room <= 0) { waitUntil = used[0] + 61; renderStatus(); await sleep((waitUntil - now()) * 1000); continue; }
+        waitUntil = 0;
+        const tf = queue[0].split("|")[1];
+        const batch = [];
+        // the demo key fails a whole batch if any symbol isn't in the demo, so it loads one at a time
+        if (demo() || solo.has(queue[0])) batch.push(queue[0]);
+        else for (let i = 0; i < queue.length && batch.length < Math.min(room, 8); i++) if (queue[i].split("|")[1] === tf && !solo.has(queue[i])) batch.push(queue[i]);
+        queue = queue.filter((k) => !batch.includes(k));
+        renderStatus();
+        await fetchBatch(batch, tf);
+        renderAll();
+      }
+    } finally { busy = false; renderStatus(); }
+  }
+  const sleep = (ms) => new Promise((r) => setTimeout(r, Math.max(0, ms)));
+  async function fetchBatch(keys, tf) {
+    const syms = keys.map((k) => k.split("|")[0]);
+    const apiSyms = syms.map(apiSymbol);
+    const url = "https://api.twelvedata.com/time_series?symbol=" + encodeURIComponent(apiSyms.join(",")) +
+      "&interval=" + TF[tf].api + "&outputsize=" + BARS + "&timezone=UTC&order=asc&apikey=" + encodeURIComponent(S.apiKey || "demo");
+    const t = now();
+    syms.forEach(() => used.push(t));
+    creditsToday(); S.credits.used += syms.length; save();
+    let json;
+    try {
+      const r = await fetch(url);
+      json = await r.json();
+    } catch (e) { lastError = "Couldn't reach Twelve Data. Check your connection."; queue = keys.concat(queue); await sleep(15000); return; }
+    lastError = "";
+    if (json && json.status === "error" && !json.meta) { // the whole request failed
+      const demoMsg = /demo/i.test(json.message || "");
+      if (json.code === 429) { lastError = "Data limit hit for this minute. Waiting…"; queue = keys.concat(queue); used.length = 0; for (let i = 0; i < 8; i++) used.push(now()); return; }
+      if (json.code === 401 && !demoMsg && !demo()) { lastError = "Your Twelve Data key was rejected. Check it under Data key below."; queue = []; return; }
+      if (syms.length > 1) { keys.forEach((k) => solo.add(k)); queue = keys.concat(queue); return; } // retry one by one to find the bad symbol
+    }
+    const per = syms.length === 1 ? { [apiSyms[0]]: json } : json;
+    syms.forEach((s, i) => {
+      const k = s + "|" + tf, j = per && per[apiSyms[i]];
+      if (!j || j.status === "error" || !Array.isArray(j.values)) {
+        let msg = (j && j.message) || "No data";
+        if (j && j.code === 429) { queue.unshift(k); return; }
+        if (/demo/i.test(msg) || (demo() && j && j.code === 401)) msg = "Not in the demo. Add your free key (see top).";
+        else if (/plan|grow|pro|upgrade/i.test(msg)) msg = "Not included in your Twelve Data plan.";
+        else if (/symbol|not found|invalid/i.test(msg)) msg = "Symbol not found. Check the spelling.";
+        else msg = msg.slice(0, 80);
+        cache[k] = { fetched: now(), error: msg };
+      } else {
+        const secs = TF[tf].secs, nowT = now();
+        const bars = j.values.map((v) => [Date.parse(v.datetime.replace(" ", "T") + (v.datetime.length > 10 ? "Z" : "T00:00:00Z")) / 1000, parseFloat(v.close)])
+          .filter((b) => isFinite(b[1]) && b[0] + secs <= nowT) // closed candles only
+          .sort((a, b) => a[0] - b[0]);
+        cache[k] = { fetched: nowT, bars, name: j.meta && (j.meta.currency_base && j.meta.currency_quote ? j.meta.currency_base + " / " + j.meta.currency_quote : j.meta.exchange || "") };
+      }
+      analyseKey(k);
+      checkAlerts(s, tf);
+    });
+    saveCache();
+  }
+
+  // ---------- alerts ----------
+  function checkAlerts(sym, tf) {
+    const r = results[sym + "|" + tf];
+    if (!r || r.error) return;
+    const k = sym + "|" + tf, seen = S.lastSeen[k];
+    const newest = r.events.length ? r.events[r.events.length - 1].t : r.close;
+    if (seen == null) { S.lastSeen[k] = newest; save(); return; } // first load: baseline only
+    const fresh = r.events.filter((e) => e.t > seen);
+    if (!fresh.length) return;
+    S.lastSeen[k] = Math.max(seen, newest); save();
+    const mode = modeOf(sym);
+    if (mode === "off" || !S.alertTfs.includes(tf)) return;
+    fresh.filter((e) => e.kind === "cross" || mode === "all").forEach((e) => {
+      const head = `${sym} ${TF[tf].label}: ${e.kind === "cross" ? "EMA 9 crossed " + e.text : e.text}`;
+      const body = `at ${fmt(e.price, r.d)}, ${e.trend} · candle closed ${clock(e.t)}`;
+      notify(head, body);
+    });
+  }
+  let toastTimer = null;
+  function notify(title, body) {
+    const t = $("toast"); t.textContent = ""; t.appendChild(el("b", null, title)); t.appendChild(el("small", null, body)); t.hidden = false;
+    clearTimeout(toastTimer); toastTimer = setTimeout(() => { t.hidden = true; }, 8000);
+    try { if (navigator.vibrate) navigator.vibrate([120, 60, 120]); } catch (e) {}
+    if ("Notification" in window && Notification.permission === "granted") {
+      const opts = { body, icon: "icon-192.png", badge: "icon-192.png", tag: title, renotify: true };
+      if (navigator.serviceWorker && navigator.serviceWorker.ready) navigator.serviceWorker.ready.then((reg) => reg.showNotification(title, opts)).catch(() => { try { new Notification(title, opts); } catch (e) {} });
+      else { try { new Notification(title, opts); } catch (e) {} }
+    }
+  }
+
+  // ---------- charts ----------
+  function svgChart(sp, w, h, pad, big) {
+    const NS = "http://www.w3.org/2000/svg", svg = document.createElementNS(NS, "svg");
+    svg.setAttribute("viewBox", `0 0 ${w} ${h}`); svg.setAttribute("preserveAspectRatio", "none");
+    svg.setAttribute("class", big ? "bigchart" : "spark"); svg.setAttribute("aria-hidden", "true");
+    const all = sp.close.concat(sp.ema9, sp.ema20); let lo = Math.min(...all), hi = Math.max(...all);
+    if (hi === lo) { hi += 1; lo -= 1; }
+    const n = sp.close.length, x = (i) => pad + (i * (w - pad * 2)) / Math.max(n - 1, 1), y = (v) => pad + (1 - (v - lo) / (hi - lo)) * (h - pad * 2);
+    const add = (tag, a) => { const e = document.createElementNS(NS, tag); for (const k in a) e.setAttribute(k, a[k]); svg.appendChild(e); return e; };
+    if (big) for (let k = 1; k < 4; k++) add("line", { x1: 0, x2: w, y1: h * k / 4, y2: h * k / 4, stroke: "var(--line)", "stroke-width": 1, "vector-effect": "non-scaling-stroke" });
+    const line = (arr, c, wd) => add("path", { d: arr.map((v, i) => (i ? "L" : "M") + x(i).toFixed(1) + " " + y(v).toFixed(1)).join(""), fill: "none", stroke: c, "stroke-width": wd, "vector-effect": "non-scaling-stroke", "stroke-linejoin": "round" });
+    line(sp.ema20, "var(--ema20)", big ? 1.6 : 1.1); line(sp.ema9, "var(--ema9)", big ? 1.6 : 1.1); line(sp.close, "var(--fg)", big ? 2 : 1.4);
+    add("circle", { cx: x(n - 1), cy: y(sp.close[n - 1]), r: big ? 3.5 : 2.4, fill: "var(--fg)" });
+    return svg;
+  }
+
+  // ---------- rendering ----------
+  const open = new Set();
+  let showAllSig = false;
+  const R = (s, tf) => { const r = results[s + "|" + tf]; return r && !r.error ? r : null; };
+  const isFresh = (r) => r && Math.min(r.cross.bars, r.cross9.bars, r.cross20.bars) <= 2;
+  const isAligned = (s) => { const st = TFS.map((t) => R(s, t) && R(s, t).state); return st.every((x) => x === "bull") || st.every((x) => x === "bear"); };
+
+  function segmented(options, value, onPick) {
+    const g = el("div", "seg"); g.setAttribute("role", "group");
+    options.forEach(([k, label]) => { const b = el("button", null, label); b.type = "button"; b.setAttribute("aria-pressed", String(k === value)); b.addEventListener("click", (e) => { e.stopPropagation(); if (k !== value) onPick(k); }); g.appendChild(b); });
+    return g;
+  }
+
+  function rowFor(s) {
+    const tf = S.tf, r = R(s, tf), raw = results[s + "|" + tf];
+    const row = el("div", "row " + (r ? r.state : ""));
+    if (!r) {
+      const e = el("div", "err"), l = el("span");
+      l.appendChild(el("b", null, s)); l.append(" " + (raw && raw.error ? raw.error : queue.includes(s + "|" + tf) || busy ? "Loading…" : "Waiting to load"));
+      e.appendChild(l); row.appendChild(e); return row;
+    }
+    const c = cache[s + "|" + tf] || {};
+    const btn = el("button"); btn.type = "button"; btn.setAttribute("aria-expanded", String(open.has(s)));
+    const sym = el("div", "sym"), t = el("div", "t");
+    t.appendChild(el("b", null, s));
+    const mode = modeOf(s);
+    t.appendChild(el("span", "nm", mode === "off" ? "alerts off" : mode === "all" ? "all crosses" : (c.name || "")));
+    sym.appendChild(t);
+    const pills = el("div", "pills"), x = r.cross;
+    pills.appendChild(el("span", "pill " + (x.up ? "up" : "dn"), `9/20 ${x.up ? "▲" : "▼"} ${since(x.t)}`));
+    pills.appendChild(el("span", "pill " + (r.above9 ? "up" : "dn"), (r.above9 ? "▲" : "▼") + "9"));
+    pills.appendChild(el("span", "pill " + (r.above20 ? "up" : "dn"), (r.above20 ? "▲" : "▼") + "20"));
+    if (Math.min(x.bars, r.cross9.bars, r.cross20.bars) === 0) pills.appendChild(el("span", "pill new", "NEW"));
+    const conf = el("span", "conf"); conf.title = "State on 1H, 4H and Daily";
+    TFS.forEach((k) => { const q = R(s, k); conf.appendChild(el("span", q ? q.state : "", k)); });
+    pills.appendChild(conf); sym.appendChild(pills); btn.appendChild(sym);
+    btn.appendChild(svgChart(r.spark, 84, 36, 3, false));
+    const px = el("div", "px"); px.appendChild(el("span", "p", fmt(r.price, r.d)));
+    const h1 = R(s, "1H");
+    if (h1 && h1.chg24h != null) px.appendChild(el("span", "c " + (h1.chg24h >= 0 ? "upc" : "dnc"), (h1.chg24h >= 0 ? "+" : "") + h1.chg24h.toFixed(2) + "%"));
+    btn.appendChild(px); row.appendChild(btn);
+
+    const det = el("div", "detail"); det.hidden = !open.has(s);
+    det.appendChild(svgChart(r.spark, 600, 140, 8, true));
+    const lg = el("div", "legend");
+    [["var(--fg)", "Close"], ["var(--ema9)", "EMA 9"], ["var(--ema20)", "EMA 20"]].forEach(([col, l]) => { const sp = el("span"), i = el("i"); i.style.background = col; sp.appendChild(i); sp.append(l); lg.appendChild(sp); });
+    lg.appendChild(el("span", null, `Last ${r.spark.close.length} ${TF[tf].label} candles`)); det.appendChild(lg);
+    const kv = el("dl", "kv"), add = (k, v) => { const d = el("div"); d.appendChild(el("dt", null, k)); d.appendChild(el("dd", null, v)); kv.appendChild(d); };
+    add("EMA 9 / EMA 20", `${fmt(r.ema9, r.d)} / ${fmt(r.ema20, r.d)}`);
+    add("Trend (EMA 200)", `${r.above200 ? "Above" : "Below"} ${fmt(r.ema200, r.d)}`);
+    add("Last 9/20 cross", `${x.up ? "Up" : "Down"} · ${dayClock(x.t)} @ ${fmt(x.price, r.d)}`);
+    add("Candle closed", dayClock(r.close));
+    add("Crossed EMA 9", `${r.cross9.up ? "Above" : "Below"} · ${dayClock(r.cross9.t)}`);
+    add("Crossed EMA 20", `${r.cross20.up ? "Above" : "Below"} · ${dayClock(r.cross20.t)}`);
+    det.appendChild(kv);
+    const set = el("div", "setline"); set.appendChild(el("span", null, `Alerts for ${s}`));
+    set.appendChild(segmented(MODES, mode, (m) => { if (m === "cross") delete S.modes[s]; else S.modes[s] = m; save(); renderAll(); }));
+    det.appendChild(set);
+    const a = el("a", "tv", `Open ${TF[tf].label} chart on TradingView`); a.href = tvUrl(s, tf); a.target = "_blank"; a.rel = "noopener"; det.appendChild(a);
+    row.appendChild(det);
+    btn.addEventListener("click", () => { const on = !open.has(s); on ? open.add(s) : open.delete(s); det.hidden = !on; btn.setAttribute("aria-expanded", String(on)); });
+    return row;
+  }
+
+  function renderStatus() {
+    const st = $("statusTxt");
+    st.className = "txt";
+    const total = S.watchlist.length * TFS.length, pending = queue.length;
+    let newest = 0; Object.keys(cache).forEach((k) => { if (cache[k].fetched > newest && S.watchlist.includes(k.split("|")[0])) newest = cache[k].fetched; });
+    if (lastError) { st.textContent = lastError; st.classList.add("bad"); }
+    else if (busy || pending) {
+      st.classList.add("busy");
+      const wait = waitUntil ? Math.max(0, Math.round(waitUntil - now())) : 0;
+      st.textContent = `Loading ${total - pending}/${total}` + (wait ? ` · next batch in ${wait}s (free plan limit)` : "…");
+    } else if (newest) {
+      const next = lastBoundary("1H") + 3600 + SETTLE;
+      st.textContent = `Updated ${clock(newest)} · next ${clock(next)} · ${creditsToday()}/${DAY_LIMIT} today`;
+    } else st.textContent = "Not loaded yet";
+    $("refreshBtn").disabled = busy;
+  }
+
+  function renderAll() {
+    const tf = S.tf, wl = S.watchlist, ok = wl.filter((s) => R(s, tf));
+    const count = { all: wl.length, fresh: ok.filter((s) => isFresh(R(s, tf))).length, aligned: ok.filter(isAligned).length,
+      bull: ok.filter((s) => R(s, tf).state === "bull").length, mixed: ok.filter((s) => R(s, tf).state === "mixed").length, bear: ok.filter((s) => R(s, tf).state === "bear").length };
+
+    const seg = $("tfSeg"); seg.textContent = "";
+    TFS.forEach((k) => { const b = el("button", null, k); b.type = "button"; b.setAttribute("aria-pressed", String(k === tf)); b.setAttribute("aria-label", TF[k].label);
+      b.addEventListener("click", () => { S.tf = k; save(); renderAll(); plan(false); }); seg.appendChild(b); });
+
+    const tabs = $("tabs"); tabs.textContent = "";
+    FILTERS.forEach(([k, label]) => { const b = el("button", "tab"); b.type = "button"; b.setAttribute("aria-pressed", String(S.filter === k)); b.append(label); b.appendChild(el("span", "n", String(count[k])));
+      b.addEventListener("click", () => { S.filter = k; save(); renderAll(); }); tabs.appendChild(b); });
+
+    const br = $("breadth"); br.textContent = "";
+    if (ok.length) [["bull", "var(--bull)"], ["mixed", "var(--mixed)"], ["bear", "var(--bear)"]].forEach(([k, col]) => { const sp = el("span"); sp.style.width = (100 * count[k] / ok.length) + "%"; sp.style.background = col; br.appendChild(sp); });
+
+    const ban = $("banner"); ban.textContent = "";
+    if (demo()) {
+      ban.hidden = false; ban.className = "note warn";
+      ban.appendChild(el("b", null, "Demo mode: only a few symbols load."));
+      const ol = el("ol");
+      const li1 = el("li"); li1.append("Get a free key at "); const a = el("a", null, "twelvedata.com"); a.href = "https://twelvedata.com/register"; a.target = "_blank"; a.rel = "noopener"; li1.appendChild(a); li1.append(" (email sign-up, no card).");
+      ol.appendChild(li1); ol.appendChild(el("li", null, "Paste it under Data key at the bottom of this page and tap Save."));
+      ban.appendChild(ol);
+    } else ban.hidden = true;
+
+    const list = $("list"); list.textContent = "";
+    let rows;
+    if (S.filter === "all") rows = wl;
+    else if (S.filter === "fresh") rows = ok.filter((s) => isFresh(R(s, tf))).sort((a, b) => { const m = (s) => { const r = R(s, tf); return Math.min(r.cross.bars, r.cross9.bars, r.cross20.bars); }; return m(a) - m(b); });
+    else if (S.filter === "aligned") rows = ok.filter(isAligned);
+    else rows = ok.filter((s) => R(s, tf).state === S.filter);
+    rows.forEach((s) => list.appendChild(rowFor(s)));
+    if (!rows.length) { const e = el("div", "err"); e.textContent = wl.length ? "No symbols match this filter right now." : "Your watchlist is empty. Add a symbol below."; list.appendChild(e); }
+
+    // recent confirmed signals across all timeframes
+    const ev = [];
+    wl.forEach((s) => TFS.forEach((t) => { const r = R(s, t); if (r) r.events.forEach((e) => { if (now() - e.t < 7 * 86400) ev.push(Object.assign({ s, tf: t, d: r.d }, e)); }); }));
+    ev.sort((a, b) => b.t - a.t);
+    $("sigBox").hidden = !ev.length;
+    const ul = $("sig"); ul.textContent = "";
+    ev.slice(0, showAllSig ? 60 : 8).forEach((e) => {
+      const li = el("li");
+      li.appendChild(el("span", "arrow " + (e.up ? "upc" : "dnc"), e.up ? "▲" : "▼"));
+      const w = el("div", "what"), top = el("b"); top.append(e.s); top.appendChild(el("span", "tfc", e.tf)); w.appendChild(top);
+      const line = el("span"); if (e.kind === "cross") line.appendChild(el("span", "key", "9/20 cross · "));
+      line.append(`${e.text} @ ${fmt(e.price, e.d)} · ${e.trend}`); w.appendChild(line);
+      li.appendChild(w); li.appendChild(el("span", "when", since(e.t))); ul.appendChild(li);
+    });
+    if (ev.length > 8) { const li = el("li"); li.style.display = "block"; li.style.padding = "0"; const b = el("button", "more", showAllSig ? "Show fewer" : `Show more (${Math.min(ev.length, 60)})`); b.type = "button"; b.addEventListener("click", () => { showAllSig = !showAllSig; renderAll(); }); li.appendChild(b); ul.appendChild(li); }
+
+    const chips = $("chips"); chips.textContent = "";
+    wl.forEach((s) => { const c = el("span", "chip"); c.append(s); const x = el("button", null, "×"); x.type = "button"; x.setAttribute("aria-label", "Remove " + s);
+      x.addEventListener("click", () => { S.watchlist = S.watchlist.filter((v) => v !== s); delete S.modes[s]; save(); msg("addMsg", `Removed ${s}.`, "good"); renderAll(); renderStatus(); }); c.appendChild(x); chips.appendChild(c); });
+
+    const at = $("alertTfs"); at.textContent = "";
+    TFS.forEach((k) => { const b = el("button", null, TF[k].label); b.type = "button"; b.setAttribute("aria-pressed", String(S.alertTfs.includes(k)));
+      b.addEventListener("click", () => { S.alertTfs = S.alertTfs.includes(k) ? S.alertTfs.filter((v) => v !== k) : TFS.filter((v) => S.alertTfs.includes(v) || v === k); save(); renderAll(); }); at.appendChild(b); });
+
+    renderNotif();
+    renderStatus();
+  }
+
+  function msg(id, text, kind) { const m = $(id); m.className = "msg" + (kind ? " " + kind : ""); m.textContent = text; }
+  function renderNotif() {
+    const b = $("notifBtn");
+    if (!("Notification" in window)) { b.hidden = true; msg("notifMsg", "This browser can't show notifications. On iPhone, add the app to your Home Screen first (Share › Add to Home Screen), then open it from there."); return; }
+    if (Notification.permission === "granted") { b.textContent = "Send a test notification"; msg("notifMsg", "Notifications are on.", "good"); }
+    else if (Notification.permission === "denied") { b.hidden = true; msg("notifMsg", "Notifications are blocked for this site. Turn them on in your browser's site settings.", "bad"); }
+    else b.textContent = "Turn on notifications";
+  }
+
+  // ---------- events ----------
+  $("refreshBtn").addEventListener("click", () => { lastError = ""; plan(true); });
+  $("addForm").addEventListener("submit", (ev) => {
+    ev.preventDefault();
+    const raw = $("addInput").value.trim().toUpperCase().replace(/[\s/]/g, "");
+    if (!raw) return;
+    if (!/^[A-Z0-9.\-]{1,14}$/.test(raw)) return msg("addMsg", "Use letters and numbers only, like EURUSD or AAPL.", "bad");
+    if (S.watchlist.includes(raw)) return msg("addMsg", `${raw} is already on your watchlist.`, "bad");
+    if (S.watchlist.length >= 30) return msg("addMsg", "The watchlist holds up to 30 symbols. Remove one first.", "bad");
+    S.watchlist.push(raw); save(); $("addInput").value = "";
+    msg("addMsg", `Added ${raw}. Loading it now.`, "good");
+    renderAll(); plan(false);
+  });
+  $("keyForm").addEventListener("submit", (ev) => {
+    ev.preventDefault();
+    const k = $("keyInput").value.trim();
+    if (k && !/^[A-Za-z0-9]{16,64}$/.test(k)) return msg("keyMsg", "That doesn't look like a Twelve Data key. Copy it again from your Twelve Data dashboard.", "bad");
+    S.apiKey = k; save();
+    // drop demo-mode errors so everything reloads with the key
+    Object.keys(cache).forEach((c) => { if (cache[c].error) delete cache[c]; }); saveCache();
+    Object.keys(results).forEach((r) => delete results[r]);
+    Object.keys(cache).forEach(analyseKey);
+    msg("keyMsg", k ? "Key saved on this phone. Loading your watchlist…" : "Key removed. Back to demo mode.", "good");
+    lastError = ""; renderAll(); plan(!!k);
+  });
+  $("keyInput").value = S.apiKey;
+  $("notifBtn").addEventListener("click", async () => {
+    if (!("Notification" in window)) return;
+    if (Notification.permission === "granted") { notify("Test: EMA scanner", "Alerts will look like this: USDCAD 1H: EMA 9 crossed above EMA 20"); return; }
+    try { await Notification.requestPermission(); } catch (e) {}
+    renderNotif();
+    if (Notification.permission === "granted") notify("Notifications are on", "You'll get EMA alerts while the scanner is open.");
+  });
+  window.addEventListener("online", () => { lastError = ""; plan(false); });
+  document.addEventListener("visibilitychange", () => { if (!document.hidden) { renderAll(); plan(false); } });
+
+  // ---------- start ----------
+  if ("serviceWorker" in navigator && location.protocol !== "file:") navigator.serviceWorker.register("sw.js").catch(() => {});
+  Object.keys(cache).forEach(analyseKey);
+  renderAll();
+  plan(false);
+  setInterval(() => { renderAll(); plan(false); }, 30000); // keeps rows' "time since" fresh and picks up each new candle
+  setInterval(renderStatus, 1000);
+})();
+</script>
+</body>
+</html>
