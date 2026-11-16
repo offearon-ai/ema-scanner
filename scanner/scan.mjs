@@ -10,6 +10,10 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
+// Secrets pasted on a phone often carry a trailing newline or spaces, which breaks the key and topic.
+const env = (name) => (process.env[name] || "").trim();
+// Accept the ntfy topic as a bare name or as a full link like https://ntfy.sh/my-topic
+const ntfyTopic = () => env("NTFY_TOPIC").replace(/^https?:\/\/[^/]+\//i, "").replace(/^\/+|\/+$/g, "");
 const CONFIG = JSON.parse(readFileSync(process.env.CONFIG_FILE || join(HERE, "config.json"), "utf8"));
 const STATE_FILE = process.env.STATE_FILE || join(HERE, "state.json");
 const TF = { "1H": { api: "1h", secs: 3600, label: "1H" }, "4H": { api: "4h", secs: 14400, label: "4H" }, "D": { api: "1day", secs: 86400, label: "Daily" } };
@@ -82,19 +86,19 @@ async function fetchBatch(syms, tf, key) {
 // ---------- delivery ----------
 async function send(title, body, up) {
   const sent = [];
-  if (process.env.NTFY_TOPIC) {
-    const server = (process.env.NTFY_SERVER || "https://ntfy.sh").replace(/\/$/, "");
-    const r = await fetch(server + "/" + encodeURIComponent(process.env.NTFY_TOPIC), {
+  if (ntfyTopic()) {
+    const server = (env("NTFY_SERVER") || "https://ntfy.sh").replace(/\/$/, "");
+    const r = await fetch(server + "/" + encodeURIComponent(ntfyTopic()), {
       method: "POST", body,
       headers: { Title: title, Tags: up == null ? "bell" : up ? "chart_with_upwards_trend" : "chart_with_downwards_trend", Priority: "high" },
     });
     if (!r.ok) throw new Error("ntfy returned " + r.status + ": " + (await r.text()).slice(0, 200));
     sent.push("ntfy");
   }
-  if (process.env.TELEGRAM_BOT_TOKEN && process.env.TELEGRAM_CHAT_ID) {
-    const r = await fetch("https://api.telegram.org/bot" + process.env.TELEGRAM_BOT_TOKEN + "/sendMessage", {
+  if (env("TELEGRAM_BOT_TOKEN") && env("TELEGRAM_CHAT_ID")) {
+    const r = await fetch("https://api.telegram.org/bot" + env("TELEGRAM_BOT_TOKEN") + "/sendMessage", {
       method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ chat_id: process.env.TELEGRAM_CHAT_ID, text: title + "\n" + body }),
+      body: JSON.stringify({ chat_id: env("TELEGRAM_CHAT_ID"), text: title + "\n" + body }),
     });
     if (!r.ok) throw new Error("Telegram returned " + r.status + ": " + (await r.text()).slice(0, 200));
     sent.push("Telegram");
@@ -110,7 +114,7 @@ export async function main() {
     console.log("Test notification sent via " + via.join(" and "));
     return;
   }
-  const key = process.env.TWELVEDATA_API_KEY;
+  const key = env("TWELVEDATA_API_KEY");
   if (!key) throw new Error("Add your Twelve Data key as the TWELVEDATA_API_KEY secret.");
   const st = loadState();
   const perMin = Math.max(1, Math.min(8, Number(CONFIG.perMinute) || 8));
@@ -135,7 +139,7 @@ export async function main() {
       try { data = await fetchBatch(batch, tf, key); }
       catch (e) {
         if (e.code === 429) { syms = batch.concat(syms); spent = Array(perMin).fill(now()); continue; }
-        if (e.code === 401) throw new Error("Twelve Data rejected the key: " + e.message);
+        if (e.code === 401) throw new Error(`Twelve Data rejected the key (it is ${key.length} characters long; free keys are usually 32). Check the TWELVEDATA_API_KEY secret matches the key on your Twelve Data dashboard. (${e.message.slice(0, 80)})`);
         if (batch.length > 1) { // find the bad symbol by loading one at a time
           for (const s of batch) { try { Object.assign(data ??= {}, await fetchBatch([s], tf, key)); } catch (e2) { (data ??= {})[s] = { error: e2.message }; } spent.push(now()); await sleep(8000); }
         } else data = { [batch[0]]: { error: e.message } };
