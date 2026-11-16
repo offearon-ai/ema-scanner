@@ -190,8 +190,8 @@ label.lbl { font-size: 11px; text-transform: uppercase; letter-spacing: .06em; c
           <span>Alert on these timeframes</span>
           <div class="toggles" id="alertTfs"></div>
         </div>
-        <p class="hint">Each symbol alerts on a confirmed EMA 9/20 cross. Open a symbol to switch it to all crosses or turn it off. Alerts only arrive while this app is open, because phones stop web apps that are closed.</p>
-        <div><button class="btn ghost" type="button" id="notifBtn">Turn on notifications</button></div>
+        <p class="hint">Each symbol alerts on a confirmed EMA 9/20 cross. Open a symbol to switch it to all crosses or turn it off. Alerts only arrive while this app is open and the screen is on: phones pause web apps that are closed, in the background, or behind a locked screen. Turn on "Keep screen awake" and leave the app open on a charger to keep alerts coming.</p>
+        <div><button class="btn ghost" type="button" id="notifBtn">Turn on notifications</button> <button class="btn ghost" type="button" id="wakeBtn" aria-pressed="false">Keep screen awake: off</button></div>
         <p class="msg" id="notifMsg" role="status"></p>
       </div>
     </section>
@@ -229,7 +229,7 @@ label.lbl { font-size: 11px; text-transform: uppercase; letter-spacing: .06em; c
 
   // ---------- storage ----------
   const KEY = "emaScanner.v1";
-  const defaults = { apiKey: "", watchlist: ["USDCAD", "EURUSD", "GBPUSD", "USDJPY", "AUDUSD", "XAUUSD", "BTCUSD"], tf: "1H", filter: "all", alertTfs: ["1H", "4H", "D"], modes: { USDCAD: "all" }, perMin: PER_MIN_DEFAULT, lastSeen: {}, credits: { day: "", used: 0 } };
+  const defaults = { apiKey: "", watchlist: ["USDCAD", "EURUSD", "GBPUSD", "USDJPY", "AUDUSD", "XAUUSD", "BTCUSD"], tf: "1H", filter: "all", alertTfs: ["1H", "4H", "D"], modes: { USDCAD: "all" }, keepAwake: false, perMin: PER_MIN_DEFAULT, lastSeen: {}, credits: { day: "", used: 0 } };
   let S;
   try { S = Object.assign({}, defaults, JSON.parse(localStorage.getItem(KEY) || "{}")); } catch (e) { S = Object.assign({}, defaults); }
   let cache = {};
@@ -392,11 +392,39 @@ label.lbl { font-size: 11px; text-transform: uppercase; letter-spacing: .06em; c
     const t = $("toast"); t.textContent = ""; t.appendChild(el("b", null, title)); t.appendChild(el("small", null, body)); t.hidden = false;
     clearTimeout(toastTimer); toastTimer = setTimeout(() => { t.hidden = true; }, 8000);
     try { if (navigator.vibrate) navigator.vibrate([120, 60, 120]); } catch (e) {}
-    if ("Notification" in window && Notification.permission === "granted") {
-      const opts = { body, icon: "icon-192.png", badge: "icon-192.png", tag: title, renotify: true };
-      if (navigator.serviceWorker && navigator.serviceWorker.ready) navigator.serviceWorker.ready.then((reg) => reg.showNotification(title, opts)).catch(() => { try { new Notification(title, opts); } catch (e) {} });
-      else { try { new Notification(title, opts); } catch (e) {} }
+    return systemNotify(title, body);
+  }
+  // Android Chrome only shows notifications through a service worker (new Notification() throws there),
+  // and serviceWorker.ready never resolves if the worker didn't register, so wait a bounded time for it.
+  async function systemNotify(title, body) {
+    if (!("Notification" in window) || Notification.permission !== "granted") return "Notifications are not allowed.";
+    const opts = { body, icon: "icon-192.png", badge: "icon-192.png", tag: title + " " + Date.now(), vibrate: [120, 60, 120] };
+    let reg = null;
+    if ("serviceWorker" in navigator) {
+      try {
+        reg = (await navigator.serviceWorker.getRegistration()) ||
+          (await Promise.race([navigator.serviceWorker.ready, sleep(4000).then(() => null)]));
+      } catch (e) { reg = null; }
     }
+    if (reg) { try { await reg.showNotification(title, opts); return ""; } catch (e) { /* fall through */ } }
+    try { new Notification(title, opts); return ""; } catch (e) { return "Your browser refused to show the notification (" + (e && e.message || e) + ")."; }
+  }
+
+  // ---------- keep screen awake ----------
+  // Phones pause web pages when the screen locks, which stops scanning and alerts. A wake lock keeps it on.
+  let wakeLock = null;
+  async function setWake(on) {
+    try {
+      if (on && "wakeLock" in navigator && !document.hidden) { wakeLock = await navigator.wakeLock.request("screen"); wakeLock.addEventListener("release", () => { wakeLock = null; renderWake(); }); }
+      else if (!on && wakeLock) { await wakeLock.release(); wakeLock = null; }
+    } catch (e) { wakeLock = null; }
+    renderWake();
+  }
+  function renderWake() {
+    const b = $("wakeBtn");
+    if (!("wakeLock" in navigator)) { b.hidden = true; return; }
+    b.textContent = S.keepAwake ? "Keep screen awake: on" : "Keep screen awake: off";
+    b.setAttribute("aria-pressed", String(!!S.keepAwake));
   }
 
   // ---------- charts ----------
@@ -556,6 +584,7 @@ label.lbl { font-size: 11px; text-transform: uppercase; letter-spacing: .06em; c
       b.addEventListener("click", () => { S.alertTfs = S.alertTfs.includes(k) ? S.alertTfs.filter((v) => v !== k) : TFS.filter((v) => S.alertTfs.includes(v) || v === k); save(); renderAll(); }); at.appendChild(b); });
 
     renderNotif();
+    renderWake();
     renderStatus();
   }
 
@@ -596,18 +625,25 @@ label.lbl { font-size: 11px; text-transform: uppercase; letter-spacing: .06em; c
   $("keyInput").value = S.apiKey;
   $("notifBtn").addEventListener("click", async () => {
     if (!("Notification" in window)) return;
-    if (Notification.permission === "granted") { notify("Test: EMA scanner", "Alerts will look like this: USDCAD 1H: EMA 9 crossed above EMA 20"); return; }
+    if (Notification.permission === "granted") {
+      const err = await notify("Test: EMA scanner", "Alerts will look like this: USDCAD 1H: EMA 9 crossed above EMA 20");
+      if (err) msg("notifMsg", err + " Check that notifications are allowed for this app in your phone's settings.", "bad");
+      else msg("notifMsg", "Test sent. If it didn't show, check that notifications for this app (or your browser) are allowed in your phone's settings and that Do Not Disturb is off.", "good");
+      return;
+    }
     try { await Notification.requestPermission(); } catch (e) {}
     renderNotif();
     if (Notification.permission === "granted") notify("Notifications are on", "You'll get EMA alerts while the scanner is open.");
   });
+  $("wakeBtn").addEventListener("click", () => { S.keepAwake = !S.keepAwake; save(); setWake(S.keepAwake); });
   window.addEventListener("online", () => { lastError = ""; plan(false); });
-  document.addEventListener("visibilitychange", () => { if (!document.hidden) { renderAll(); plan(false); } });
+  document.addEventListener("visibilitychange", () => { if (!document.hidden) { if (S.keepAwake) setWake(true); renderAll(); plan(false); } });
 
   // ---------- start ----------
   if ("serviceWorker" in navigator && location.protocol !== "file:") navigator.serviceWorker.register("sw.js").catch(() => {});
   Object.keys(cache).forEach(analyseKey);
   renderAll();
+  if (S.keepAwake) setWake(true);
   plan(false);
   setInterval(() => { renderAll(); plan(false); }, 30000); // keeps rows' "time since" fresh and picks up each new candle
   setInterval(renderStatus, 1000);
