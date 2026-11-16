@@ -1,0 +1,6 @@
+{
+  "watchlist": ["USDCAD", "EURUSD", "GBPUSD", "USDJPY", "AUDUSD", "XAUUSD", "BTCUSD"],
+  "alertTimeframes": ["1H", "4H", "D"],
+  "modes": { "USDCAD": "all" },
+  "perMinute": 8
+}

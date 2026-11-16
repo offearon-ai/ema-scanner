@@ -1,0 +1,45 @@
+name: EMA background scan
+
+on:
+  schedule:
+    - cron: "3 * * * *" # every hour, a few minutes after the candle closes (GitHub may run it a little late)
+  workflow_dispatch:
+    inputs:
+      test:
+        description: "Only send a test notification"
+        type: boolean
+        default: false
+
+concurrency:
+  group: ema-scan
+  cancel-in-progress: false
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      # Remembers which signals were already sent, so each one alerts only once.
+      - uses: actions/cache/restore@v4
+        with:
+          path: scanner/state.json
+          key: ema-scan-state-${{ github.run_id }}
+          restore-keys: ema-scan-state-
+      - name: Scan
+        run: node scanner/scan.mjs
+        env:
+          TWELVEDATA_API_KEY: ${{ secrets.TWELVEDATA_API_KEY }}
+          NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
+          NTFY_SERVER: ${{ vars.NTFY_SERVER }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          SEND_TEST: ${{ inputs.test && '1' || '0' }}
+      - uses: actions/cache/save@v4
+        if: always() && hashFiles('scanner/state.json') != ''
+        with:
+          path: scanner/state.json
+          key: ema-scan-state-${{ github.run_id }}
